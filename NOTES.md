@@ -22,3 +22,9 @@
 
 ## Deploy (verified by me)
 - Deployed to picktogether.app.space; tested create room, add options, vote on the live site.
+
+## Step 3 — AI Summary (verified by me)
+- Agent built a server action using DeepSpace's built-in Claude integration (Haiku). No API key in code or browser.
+- Server counts votes itself; no votes = no AI call.
+- I tested: "No votes yet" works; after voting, the summary correctly said Thai is winning.
+- Known limit: my account pays for each summary, so any signed-in user can spend a little of my credit.
