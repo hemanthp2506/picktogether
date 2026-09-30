@@ -37,3 +37,8 @@
 ## Integration 2 — Weather (verified by me)
 - Agent built a getForecast server action using DeepSpace's built-in openweathermap/forecast integration ($0.00195 per call), plus a "Check the weather" box on the room page.
 - I tested: Buffalo showed 5 days (Thu 21°/15°C, matches my local weather); "asdfqwerty" showed a clear red error.
+
+## Integration 3 — Place search (verified by me)
+- Agent built a searchPlaces server action using DeepSpace's built-in serpapi/places-search integration ($0.0325 per search), plus a "Find places" box on the room page that adds a result as an option in one click.
+- I tested: "pizza in Buffalo NY" showed 5 real places with ratings; I added La Nova, it appeared in options and the button changed to Added; I voted on it (1 vote).
+- "Buffalo ,NY" alone showed "No places found."
