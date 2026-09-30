@@ -82,6 +82,64 @@ const summarizeRoom: ActionHandler<Env> = async ({ params, tools }) => {
   return { success: true, data: { summary } }
 }
 
+// One entry of `openweathermap/forecast` (5 days in 3-hour steps).
+type ForecastEntry = { dt: number; temp: number; description: string }
+
+export type ForecastDay = { date: string; day: string; high: number; low: number; description: string }
+
+/**
+ * Five-day weather for a city, boiled down to one line per day
+ * (high, low, and the most common conditions).
+ *
+ * Days are grouped by UTC date, since the forecast doesn't include the
+ * city's time zone.
+ */
+const getForecast: ActionHandler<Env> = async ({ params, tools }) => {
+  const location = typeof params.location === 'string' ? params.location.trim() : ''
+  if (!location) return { success: false, error: 'Please enter a city.' }
+  if (location.length > 100) return { success: false, error: 'City name is too long.' }
+
+  // The endpoint's schema lists both `location` and `q` without saying which it
+  // reads, so we send the city in both.
+  const res = await tools.integration<ForecastEntry[]>('openweathermap/forecast', {
+    location,
+    q: location,
+    units: 'metric',
+  })
+  if (!res.success) {
+    console.error(`[getForecast] weather call failed: ${res.error}`)
+    return { success: false, error: `Couldn't get the weather for "${location}". Check the city name and try again.` }
+  }
+
+  const entries = Array.isArray(res.data) ? res.data : []
+  if (entries.length === 0) {
+    return { success: false, error: `No forecast found for "${location}".` }
+  }
+
+  const byDate = new Map<string, ForecastEntry[]>()
+  for (const e of entries) {
+    const date = new Date(e.dt * 1000).toISOString().slice(0, 10)
+    byDate.set(date, [...(byDate.get(date) ?? []), e])
+  }
+
+  const days: ForecastDay[] = [...byDate.entries()].slice(0, 5).map(([date, list]) => {
+    const temps = list.map((e) => e.temp)
+    const tally = new Map<string, number>()
+    for (const e of list) tally.set(e.description, (tally.get(e.description) ?? 0) + 1)
+    const description = [...tally.entries()].sort((a, b) => b[1] - a[1])[0][0]
+    return {
+      date,
+      day: new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
+      high: Math.round(Math.max(...temps)),
+      low: Math.round(Math.min(...temps)),
+      description,
+    }
+  })
+
+  return { success: true, data: { location, days } }
+}
+
 export const actions: Record<string, ActionHandler<Env>> = {
   summarizeRoom,
+  getForecast,
 }

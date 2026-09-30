@@ -33,3 +33,7 @@
 ## Redeploy after Step 3 (verified by me)
 - Redeployed to picktogether.app.space after step 3.
 - Tested the AI summary on the live site: room "Weekend plan?", voted Hiking; the summary correctly said Hiking is winning.
+
+## Integration 2 — Weather (verified by me)
+- Agent built a getForecast server action using DeepSpace's built-in openweathermap/forecast integration ($0.00195 per call), plus a "Check the weather" box on the room page.
+- I tested: Buffalo showed 5 days (Thu 21°/15°C, matches my local weather); "asdfqwerty" showed a clear red error.

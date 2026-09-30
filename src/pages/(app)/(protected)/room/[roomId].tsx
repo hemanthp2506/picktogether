@@ -82,6 +82,7 @@ export default function RoomPage() {
         </section>
 
         <AiSummary roomId={roomId} totalVotes={votes.length} />
+        <WeatherBox />
       </div>
     </div>
   )
@@ -271,6 +272,103 @@ function AiSummary({ roomId, totalVotes }: { roomId: string; totalVotes: number 
         {state.kind === 'done' && <p data-testid="ai-summary">{state.summary}</p>}
         {state.kind === 'error' && (
           <p role="alert" data-testid="ai-summary-error" className="text-destructive">
+            {state.message}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+type ForecastDay = { date: string; day: string; high: number; low: number; description: string }
+
+type WeatherState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'done'; location: string; days: ForecastDay[] }
+  | { kind: 'error'; message: string }
+
+/**
+ * "Check the weather" - asks the server action `getForecast` for a 5-day
+ * forecast. Shown only to whoever clicked; the city isn't saved.
+ */
+function WeatherBox() {
+  const [city, setCity] = useState('')
+  const [state, setState] = useState<WeatherState>({ kind: 'idle' })
+
+  async function check(e: FormEvent) {
+    e.preventDefault()
+    const location = city.trim()
+    if (!location) return
+
+    setState({ kind: 'loading' })
+    try {
+      const res = await fetch('/api/actions/getForecast', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${await getAuthToken()}`,
+        },
+        body: JSON.stringify({ location }),
+      })
+      const body = (await res.json().catch(() => null)) as
+        | { success: true; data: { location: string; days: ForecastDay[] } }
+        | { success: false; error: string }
+        | null
+      if (!res.ok || !body || !body.success) {
+        const message =
+          body && !body.success && body.error
+            ? body.error
+            : "Couldn't get the weather. Please try again."
+        setState({ kind: 'error', message })
+        return
+      }
+      setState({ kind: 'done', ...body.data })
+    } catch {
+      setState({ kind: 'error', message: "Couldn't reach the server. Check your connection and try again." })
+    }
+  }
+
+  const loading = state.kind === 'loading'
+
+  return (
+    <section className="mt-6 rounded-lg border border-border bg-card p-6">
+      <h2 className="text-lg font-semibold">Check the weather</h2>
+      <form onSubmit={check} className="mt-4 flex gap-2">
+        <Input
+          value={city}
+          onChange={(e) => setCity(e.target.value)}
+          placeholder="City, e.g. Austin"
+          maxLength={100}
+          aria-label="City"
+        />
+        <Button type="submit" variant="secondary" disabled={loading || !city.trim()}>
+          {loading ? 'Checking…' : 'Check'}
+        </Button>
+      </form>
+      <div aria-live="polite" className="mt-4 text-sm">
+        {state.kind === 'idle' && (
+          <p className="text-muted-foreground">Planning something outdoors? See the next 5 days.</p>
+        )}
+        {state.kind === 'loading' && <p className="text-muted-foreground">Looking up the forecast…</p>}
+        {state.kind === 'done' && (
+          <div data-testid="weather-forecast">
+            <p className="text-muted-foreground">Next 5 days in {state.location}</p>
+            <ul className="mt-2 space-y-1">
+              {state.days.map((d) => (
+                <li key={d.date} className="flex justify-between gap-4">
+                  <span className="w-10 font-medium">{d.day}</span>
+                  <span className="flex-1 capitalize text-muted-foreground">{d.description}</span>
+                  <span className="tabular-nums">
+                    {d.high}° / {d.low}°C
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {state.kind === 'error' && (
+          <p role="alert" data-testid="weather-error" className="text-destructive">
             {state.message}
           </p>
         )}

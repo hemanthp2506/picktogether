@@ -18,14 +18,19 @@ test.describe('API tests', () => {
   })
 })
 
-test.describe('summarizeRoom action', () => {
-  test('refuses a signed-out caller', async ({ request }) => {
+test.describe('Server actions (signed out)', () => {
+  test('summarizeRoom refuses a signed-out caller', async ({ request }) => {
     const res = await request.post('/api/actions/summarizeRoom', { data: { roomId: 'anything' } })
+    expect(res.status()).toBe(401)
+  })
+
+  test('getForecast refuses a signed-out caller', async ({ request }) => {
+    const res = await request.post('/api/actions/getForecast', { data: { location: 'Austin' } })
     expect(res.status()).toBe(401)
   })
 })
 
-userTest.describe('summarizeRoom action (signed in)', () => {
+userTest.describe('Server actions (signed in)', () => {
   const usable = loadAllTestAccounts().length
   userTest.skip(
     usable < 1,
@@ -34,7 +39,7 @@ userTest.describe('summarizeRoom action (signed in)', () => {
   )
 
   // These never reach the AI: a room with no votes, and a room that doesn't exist.
-  userTest('returns "No votes yet." without calling the AI, and refuses unknown rooms', async ({ users }) => {
+  userTest('summarizeRoom returns "No votes yet." without calling the AI, and refuses unknown rooms', async ({ users }) => {
     const [a] = await users(1)
     const question = `__test-${Date.now()}__ Summary with no votes`
 
@@ -69,5 +74,28 @@ userTest.describe('summarizeRoom action (signed in)', () => {
 
     const missing = await call({})
     expect(await missing.json()).toMatchObject({ success: false, error: 'Missing room id.' })
+  })
+
+  // Bad input is refused before the (paid) weather call is made.
+  userTest('getForecast refuses empty and overly long city names', async ({ users }) => {
+    const [a] = await users(1)
+    await a.page.goto('/home')
+    const tokenRes = await a.page.request.post('/api/auth/token')
+    const { token } = (await tokenRes.json()) as { token: string }
+    const call = (body: unknown) =>
+      a.page.request.post('/api/actions/getForecast', {
+        headers: { Authorization: `Bearer ${token}` },
+        data: body,
+      })
+
+    expect(await (await call({})).json()).toMatchObject({ success: false, error: 'Please enter a city.' })
+    expect(await (await call({ location: '   ' })).json()).toMatchObject({
+      success: false,
+      error: 'Please enter a city.',
+    })
+    expect(await (await call({ location: 'x'.repeat(101) })).json()).toMatchObject({
+      success: false,
+      error: 'City name is too long.',
+    })
   })
 })
