@@ -9,7 +9,7 @@
 
 import { useState, type FormEvent } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useMutations, useQuery, useUser, type RecordData } from 'deepspace'
+import { getAuthToken, useMutations, useQuery, useUser, type RecordData } from 'deepspace'
 import { Button, Input, cn, useToast } from '@/components/ui'
 
 type Room = { question: string }
@@ -80,6 +80,8 @@ export default function RoomPage() {
           <OptionList roomId={roomId} options={options} votes={votes} myVote={myVote} />
           <AddOptionForm roomId={roomId} />
         </section>
+
+        <AiSummary roomId={roomId} totalVotes={votes.length} />
       </div>
     </div>
   )
@@ -199,5 +201,80 @@ function AddOptionForm({ roomId }: { roomId: string }) {
         Add
       </Button>
     </form>
+  )
+}
+
+type SummaryState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'done'; summary: string }
+  | { kind: 'error'; message: string }
+
+/**
+ * "Summarize with AI" - asks the server action `summarizeRoom` for a short
+ * summary. The AI call happens on the server; the browser only sends the room id.
+ * The summary is shown to whoever clicked, not saved or synced.
+ */
+function AiSummary({ roomId, totalVotes }: { roomId: string; totalVotes: number }) {
+  const [state, setState] = useState<SummaryState>({ kind: 'idle' })
+
+  async function summarize() {
+    // Nothing to summarize: skip the AI call entirely.
+    if (totalVotes === 0) {
+      setState({ kind: 'done', summary: 'No votes yet.' })
+      return
+    }
+
+    setState({ kind: 'loading' })
+    try {
+      const res = await fetch('/api/actions/summarizeRoom', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${await getAuthToken()}`,
+        },
+        body: JSON.stringify({ roomId }),
+      })
+      const body = (await res.json().catch(() => null)) as
+        | { success: true; data: { summary: string } }
+        | { success: false; error: string }
+        | null
+      if (!res.ok || !body || !body.success) {
+        const message =
+          body && !body.success && body.error
+            ? body.error
+            : "Couldn't get a summary. Please try again."
+        setState({ kind: 'error', message })
+        return
+      }
+      setState({ kind: 'done', summary: body.data.summary })
+    } catch {
+      setState({ kind: 'error', message: "Couldn't reach the server. Check your connection and try again." })
+    }
+  }
+
+  const loading = state.kind === 'loading'
+
+  return (
+    <section className="mt-10 rounded-lg border border-border bg-card p-6">
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="text-lg font-semibold">AI summary</h2>
+        <Button variant="secondary" onClick={summarize} disabled={loading}>
+          {loading ? 'Summarizing…' : 'Summarize with AI'}
+        </Button>
+      </div>
+      <div aria-live="polite" className="mt-4 text-sm">
+        {state.kind === 'idle' && (
+          <p className="text-muted-foreground">Get a quick read on where the vote stands.</p>
+        )}
+        {state.kind === 'loading' && <p className="text-muted-foreground">Thinking…</p>}
+        {state.kind === 'done' && <p data-testid="ai-summary">{state.summary}</p>}
+        {state.kind === 'error' && (
+          <p role="alert" data-testid="ai-summary-error" className="text-destructive">
+            {state.message}
+          </p>
+        )}
+      </div>
+    </section>
   )
 }
