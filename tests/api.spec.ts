@@ -28,6 +28,11 @@ test.describe('Server actions (signed out)', () => {
     const res = await request.post('/api/actions/getForecast', { data: { location: 'Austin' } })
     expect(res.status()).toBe(401)
   })
+
+  test('searchPlaces refuses a signed-out caller', async ({ request }) => {
+    const res = await request.post('/api/actions/searchPlaces', { data: { query: 'thai food' } })
+    expect(res.status()).toBe(401)
+  })
 })
 
 userTest.describe('Server actions (signed in)', () => {
@@ -96,6 +101,28 @@ userTest.describe('Server actions (signed in)', () => {
     expect(await (await call({ location: 'x'.repeat(101) })).json()).toMatchObject({
       success: false,
       error: 'City name is too long.',
+    })
+  })
+
+  // Bad input is refused before the (paid) place search is made.
+  userTest('searchPlaces refuses empty and overly long searches', async ({ users }) => {
+    const [a] = await users(1)
+    await a.page.goto('/home')
+    const tokenRes = await a.page.request.post('/api/auth/token')
+    const { token } = (await tokenRes.json()) as { token: string }
+    const call = (body: unknown) =>
+      a.page.request.post('/api/actions/searchPlaces', {
+        headers: { Authorization: `Bearer ${token}` },
+        data: body,
+      })
+
+    expect(await (await call({})).json()).toMatchObject({
+      success: false,
+      error: 'Please enter what to search for.',
+    })
+    expect(await (await call({ query: 'x'.repeat(101) })).json()).toMatchObject({
+      success: false,
+      error: 'Search is too long.',
     })
   })
 })

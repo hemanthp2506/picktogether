@@ -139,7 +139,52 @@ const getForecast: ActionHandler<Env> = async ({ params, tools }) => {
   return { success: true, data: { location, days } }
 }
 
+// The fields we use from a `serpapi/places-search` result (Google Maps).
+type PlacesSearchResponse = {
+  local_results?: {
+    place_id?: string
+    title?: string
+    rating?: number
+    reviews?: number
+    address?: string
+    type?: string
+  }[]
+}
+
+export type Place = { placeId: string; name: string; rating?: number; reviews?: number; address?: string; type?: string }
+
+/**
+ * Search Google Maps places (e.g. "thai food in Buffalo NY") and return the
+ * top 5 with only the fields the room page shows.
+ */
+const searchPlaces: ActionHandler<Env> = async ({ params, tools }) => {
+  const query = typeof params.query === 'string' ? params.query.trim() : ''
+  if (!query) return { success: false, error: 'Please enter what to search for.' }
+  if (query.length > 100) return { success: false, error: 'Search is too long.' }
+
+  const res = await tools.integration<PlacesSearchResponse>('serpapi/places-search', { q: query })
+  if (!res.success) {
+    console.error(`[searchPlaces] places call failed: ${res.error}`)
+    return { success: false, error: 'Place search is unavailable right now. Please try again.' }
+  }
+
+  const places: Place[] = (res.data.local_results ?? [])
+    .filter((r) => r.title)
+    .slice(0, 5)
+    .map((r, i) => ({
+      placeId: r.place_id ?? `${i}-${r.title}`,
+      name: r.title!,
+      rating: r.rating,
+      reviews: r.reviews,
+      address: r.address,
+      type: r.type,
+    }))
+
+  return { success: true, data: { places } }
+}
+
 export const actions: Record<string, ActionHandler<Env>> = {
   summarizeRoom,
   getForecast,
+  searchPlaces,
 }

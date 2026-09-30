@@ -81,6 +81,7 @@ export default function RoomPage() {
           <AddOptionForm roomId={roomId} />
         </section>
 
+        <PlaceSearch roomId={roomId} existingLabels={options.map((o) => o.data.label)} />
         <AiSummary roomId={roomId} totalVotes={votes.length} />
         <WeatherBox />
       </div>
@@ -369,6 +370,122 @@ function WeatherBox() {
         )}
         {state.kind === 'error' && (
           <p role="alert" data-testid="weather-error" className="text-destructive">
+            {state.message}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+type Place = { placeId: string; name: string; rating?: number; reviews?: number; address?: string; type?: string }
+
+type PlaceSearchState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'done'; places: Place[] }
+  | { kind: 'error'; message: string }
+
+/**
+ * "Find places" - searches Google Maps through the server action
+ * `searchPlaces` and lets you add a result as an option in one click.
+ * Results are shown only to whoever searched; added options sync to everyone.
+ */
+function PlaceSearch({ roomId, existingLabels }: { roomId: string; existingLabels: string[] }) {
+  const { ready, create } = useMutations<Option>('options')
+  const [query, setQuery] = useState('')
+  const [state, setState] = useState<PlaceSearchState>({ kind: 'idle' })
+  const existing = new Set(existingLabels.map((l) => l.trim().toLowerCase()))
+
+  async function search(e: FormEvent) {
+    e.preventDefault()
+    const q = query.trim()
+    if (!q) return
+
+    setState({ kind: 'loading' })
+    try {
+      const res = await fetch('/api/actions/searchPlaces', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${await getAuthToken()}`,
+        },
+        body: JSON.stringify({ query: q }),
+      })
+      const body = (await res.json().catch(() => null)) as
+        | { success: true; data: { places: Place[] } }
+        | { success: false; error: string }
+        | null
+      if (!res.ok || !body || !body.success) {
+        const message =
+          body && !body.success && body.error ? body.error : "Couldn't search places. Please try again."
+        setState({ kind: 'error', message })
+        return
+      }
+      setState({ kind: 'done', places: body.data.places })
+    } catch {
+      setState({ kind: 'error', message: "Couldn't reach the server. Check your connection and try again." })
+    }
+  }
+
+  const loading = state.kind === 'loading'
+
+  return (
+    <section className="mt-10 rounded-lg border border-border bg-card p-6">
+      <h2 className="text-lg font-semibold">Find places</h2>
+      <form onSubmit={search} className="mt-4 flex gap-2">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="e.g. thai food in Buffalo NY"
+          maxLength={100}
+          aria-label="Search places"
+        />
+        <Button type="submit" variant="secondary" disabled={loading || !query.trim()}>
+          {loading ? 'Searching…' : 'Search'}
+        </Button>
+      </form>
+      <div aria-live="polite" className="mt-4 text-sm">
+        {state.kind === 'idle' && (
+          <p className="text-muted-foreground">Search Google Maps and add real places as options.</p>
+        )}
+        {state.kind === 'loading' && <p className="text-muted-foreground">Searching Google Maps…</p>}
+        {state.kind === 'done' && state.places.length === 0 && (
+          <p className="text-muted-foreground">No places found. Try different words.</p>
+        )}
+        {state.kind === 'done' && state.places.length > 0 && (
+          <ul data-testid="place-results" className="space-y-2">
+            {state.places.map((p) => {
+              const added = existing.has(p.name.trim().toLowerCase())
+              return (
+                <li key={p.placeId} className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{p.name}</p>
+                    <p className="truncate text-muted-foreground">
+                      {[
+                        p.rating !== undefined &&
+                          `★ ${p.rating}${p.reviews !== undefined ? ` (${p.reviews})` : ''}`,
+                        p.type,
+                        p.address,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    disabled={!ready || added}
+                    onClick={() => create({ roomId, label: p.name })}
+                  >
+                    {added ? 'Added' : 'Add'}
+                  </Button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+        {state.kind === 'error' && (
+          <p role="alert" data-testid="place-error" className="text-destructive">
             {state.message}
           </p>
         )}
