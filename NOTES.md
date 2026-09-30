@@ -27,4 +27,9 @@
 - Agent built a server action using DeepSpace's built-in Claude integration (Haiku). No API key in code or browser.
 - Server counts votes itself; no votes = no AI call.
 - I tested: "No votes yet" works; after voting, the summary correctly said Thai is winning.
+- I ran tests/api.spec.ts myself: 4 passed.
 - Known limit: my account pays for each summary, so any signed-in user can spend a little of my credit.
+
+## Redeploy after Step 3 (verified by me)
+- Redeployed to picktogether.app.space after step 3.
+- Tested the AI summary on the live site: room "Weekend plan?", voted Hiking; the summary correctly said Hiking is winning.
