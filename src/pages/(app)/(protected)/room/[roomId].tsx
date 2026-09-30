@@ -2,21 +2,38 @@
  * Room page - reached at /room/:roomId. Sign-in is required because it sits
  * under (protected)/.
  *
- * Step 1: shows the question and a copy-link button. Options and votes come next.
+ * Shows the question, lets anyone add options, and lets each person cast one
+ * vote. Counts are computed from the live `votes` records, so they update for
+ * everyone as soon as the server broadcasts a change.
  */
 
+import { useState, type FormEvent } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useQuery } from 'deepspace'
-import { Button, useToast } from '@/components/ui'
+import { useMutations, useQuery, useUser, type RecordData } from 'deepspace'
+import { Button, Input, cn, useToast } from '@/components/ui'
 
 type Room = { question: string }
+type Option = { roomId: string; label: string }
+// `userId` is stamped by the server (userBound), so we never send it.
+type VoteInput = { roomId: string; optionId: string }
+type Vote = VoteInput & { userId: string }
 
 export default function RoomPage() {
-  const { roomId } = useParams<{ roomId: string }>()
+  const { roomId = '' } = useParams<{ roomId: string }>()
+  const { user } = useUser()
   const { success, error } = useToast()
+
   // Rooms are few and small, so we subscribe to all of them and pick this one.
-  const { records, status } = useQuery<Room>('rooms')
-  const room = records.find((r) => r.recordId === roomId)
+  const { records: rooms, status } = useQuery<Room>('rooms')
+  const room = rooms.find((r) => r.recordId === roomId)
+
+  // Only this room's options and votes; `where` is applied on the server.
+  const { records: options } = useQuery<Option>('options', {
+    where: { roomId },
+    orderBy: 'createdAt',
+    orderDir: 'asc',
+  })
+  const { records: votes } = useQuery<Vote>('votes', { where: { roomId } })
 
   async function copyLink() {
     try {
@@ -42,15 +59,145 @@ export default function RoomPage() {
     )
   }
 
+  const myVote = votes.find((v) => v.data.userId === user?.id)
+
   return (
     <div className="min-h-full text-foreground">
       <div className="mx-auto max-w-xl px-6 py-20">
         <p className="text-sm text-muted-foreground">Question</p>
-        <h1 className="mt-1 text-3xl font-bold tracking-tight">{room.data.question}</h1>
+        <h1 data-testid="room-question" className="mt-1 text-3xl font-bold tracking-tight">{room.data.question}</h1>
         <Button variant="secondary" className="mt-6" onClick={copyLink}>
           Copy room link
         </Button>
+
+        <section className="mt-10 space-y-3">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-lg font-semibold">Options</h2>
+            <p data-testid="vote-total" className="text-sm text-muted-foreground">
+              {votes.length} {votes.length === 1 ? 'vote' : 'votes'}
+            </p>
+          </div>
+          <OptionList roomId={roomId} options={options} votes={votes} myVote={myVote} />
+          <AddOptionForm roomId={roomId} />
+        </section>
       </div>
     </div>
+  )
+}
+
+function OptionList({
+  roomId,
+  options,
+  votes,
+  myVote,
+}: {
+  roomId: string
+  options: RecordData<Option>[]
+  votes: RecordData<Vote>[]
+  myVote: RecordData<Vote> | undefined
+}) {
+  const { ready, createConfirmed, putConfirmed, removeConfirmed } =
+    useMutations<VoteInput>('votes')
+  const { error } = useToast()
+  const [pending, setPending] = useState(false)
+
+  if (options.length === 0) {
+    return (
+      <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+        No options yet. Add the first one below.
+      </p>
+    )
+  }
+
+  // Count votes per option from the live records.
+  const counts = new Map<string, number>()
+  for (const v of votes) counts.set(v.data.optionId, (counts.get(v.data.optionId) ?? 0) + 1)
+  const maxCount = Math.max(1, ...counts.values())
+
+  async function vote(optionId: string) {
+    setPending(true)
+    try {
+      if (!myVote) {
+        await createConfirmed({ roomId, optionId })
+      } else if (myVote.data.optionId === optionId) {
+        // Clicking your current choice again takes the vote back.
+        await removeConfirmed(myVote.recordId)
+      } else {
+        await putConfirmed(myVote.recordId, { optionId })
+      }
+    } catch (err) {
+      error('Could not save your vote', String(err))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <ul className="space-y-2">
+      {options.map((option) => {
+        const count = counts.get(option.recordId) ?? 0
+        const isMine = myVote?.data.optionId === option.recordId
+        return (
+          <li key={option.recordId} data-testid="option">
+            <button
+              type="button"
+              onClick={() => vote(option.recordId)}
+              disabled={!ready || pending}
+              aria-pressed={isMine}
+              className={cn(
+                'relative w-full overflow-hidden rounded-lg border bg-card px-4 py-3 text-left transition-colors',
+                'hover:border-primary disabled:cursor-not-allowed disabled:opacity-60',
+                isMine ? 'border-primary' : 'border-border',
+              )}
+            >
+              {/* Bar behind the text, sized relative to the leading option. */}
+              <span
+                aria-hidden
+                className="absolute inset-y-0 left-0 bg-primary/10 transition-[width] duration-300"
+                style={{ width: `${(count / maxCount) * 100}%` }}
+              />
+              <span className="relative flex items-center justify-between gap-4">
+                <span className="font-medium">
+                  {option.data.label}
+                  {isMine && <span className="ml-2 text-xs text-primary">Your vote</span>}
+                </span>
+                <span data-testid="option-count" className="tabular-nums text-muted-foreground">
+                  {count}
+                </span>
+              </span>
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+function AddOptionForm({ roomId }: { roomId: string }) {
+  const { ready, create } = useMutations<Option>('options')
+  const [label, setLabel] = useState('')
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    const trimmed = label.trim()
+    if (!trimmed) return
+    // Fire-and-forget: a rejected write shows a toast via the app layout's onWriteError.
+    create({ roomId, label: trimmed })
+    setLabel('')
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex gap-2 pt-2">
+      <Input
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        placeholder="Add an option, e.g. Thai place"
+        maxLength={100}
+        aria-label="New option"
+      />
+      <Button type="submit" disabled={!ready || !label.trim()}>
+        Add
+      </Button>
+    </form>
   )
 }

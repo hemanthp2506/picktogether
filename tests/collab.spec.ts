@@ -131,3 +131,66 @@ test('API status page shows local retry after first-load API failure', async ({ 
   await expect.poll(() => requestCount).toBeGreaterThan(requestsAfterFailure)
   expect(user.page.url()).toBe(urlAfterFailure)
 })
+
+test('room: A creates and adds options, B joins by link, votes sync live', async ({ users }) => {
+  const [a, b] = await users(2)
+  const question = `__test-${Date.now()}__ Where should we eat Friday?`
+
+  // Reads one option's live count by its label.
+  const countOf = (page: typeof a.page, label: string) =>
+    page.getByTestId('option').filter({ hasText: label }).getByTestId('option-count')
+  const voteButton = (page: typeof a.page, label: string) =>
+    page.getByTestId('option').filter({ hasText: label }).getByRole('button')
+
+  // A creates the room and lands on its page.
+  await a.page.goto('/home')
+  await a.page.getByLabel('Your question').fill(question)
+  await a.page.getByRole('button', { name: 'Create room' }).click()
+  await a.page.waitForURL(/\/room\/[^/]+$/, { timeout: 15_000 })
+  await expect(a.page.getByTestId('room-question')).toHaveText(question)
+  const roomUrl = a.page.url()
+
+  // A adds two options.
+  for (const label of ['Thai', 'Pizza']) {
+    await a.page.getByLabel('New option').fill(label)
+    await a.page.getByRole('button', { name: 'Add' }).click()
+    await expect(a.page.getByTestId('option').filter({ hasText: label })).toBeVisible()
+  }
+
+  // B opens the shared link and sees the room and both options.
+  await b.page.goto(roomUrl)
+  await expect(b.page.getByTestId('room-question')).toHaveText(question, { timeout: 15_000 })
+  await expect(b.page.getByTestId('option')).toHaveCount(2)
+
+  // A votes Thai -> both see Thai 1, total 1.
+  await voteButton(a.page, 'Thai').click()
+  for (const u of [a, b]) {
+    await expect(countOf(u.page, 'Thai')).toHaveText('1')
+    await expect(u.page.getByTestId('vote-total')).toHaveText('1 vote')
+  }
+  await expect(voteButton(a.page, 'Thai')).toHaveAttribute('aria-pressed', 'true')
+
+  // B votes Pizza -> both see Thai 1, Pizza 1, total 2.
+  await voteButton(b.page, 'Pizza').click()
+  for (const u of [a, b]) {
+    await expect(countOf(u.page, 'Thai')).toHaveText('1')
+    await expect(countOf(u.page, 'Pizza')).toHaveText('1')
+    await expect(u.page.getByTestId('vote-total')).toHaveText('2 votes')
+  }
+
+  // A switches to Pizza -> vote moves, total stays 2.
+  await voteButton(a.page, 'Pizza').click()
+  for (const u of [a, b]) {
+    await expect(countOf(u.page, 'Thai')).toHaveText('0')
+    await expect(countOf(u.page, 'Pizza')).toHaveText('2')
+    await expect(u.page.getByTestId('vote-total')).toHaveText('2 votes')
+  }
+
+  // B clicks Pizza again to take the vote back -> Pizza 1, total 1.
+  await voteButton(b.page, 'Pizza').click()
+  for (const u of [a, b]) {
+    await expect(countOf(u.page, 'Pizza')).toHaveText('1')
+    await expect(u.page.getByTestId('vote-total')).toHaveText('1 vote')
+  }
+  await expect(voteButton(b.page, 'Pizza')).toHaveAttribute('aria-pressed', 'false')
+})
