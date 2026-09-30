@@ -1,28 +1,84 @@
 /**
- * Placeholder home page — replace this with the app's real home.
- *
- * This is intentionally unstyled scaffolding, not a design to build on.
- * Design the app's own look (layout, theme tokens, typography) from your
- * product's point of view instead of extending this page.
+ * Home - create a room with a question, then jump to the room page.
  */
 
-import { useAuthProfileReady } from 'deepspace'
-import { APP_NAME } from '../../constants'
+import { useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { AuthOverlay, useAuthProfileReady, useMutations } from 'deepspace'
+import { Button, Input, Label, useToast } from '@/components/ui'
+
+type Room = { question: string }
 
 export default function HomePage() {
-  const { isSignedIn, user } = useAuthProfileReady({ requireUser: true })
+  const { isSignedIn } = useAuthProfileReady({ requireUser: true })
+  const [showAuthModal, setShowAuthModal] = useState(false)
 
   return (
-    <div className="flex min-h-full flex-col items-center justify-center gap-3 bg-background px-6 text-center text-foreground">
-      <h1 className="text-2xl font-semibold">{APP_NAME}</h1>
-      <p className="max-w-md text-sm text-muted-foreground">
-        This is a placeholder page. Replace <code>src/pages/(app)/home.tsx</code>{' '}
-        with the app&apos;s real home, and give the app its own theme in{' '}
-        <code>src/themes.css</code>.
-      </p>
-      {isSignedIn && user && (
-        <p className="text-sm text-muted-foreground">Signed in as {user.name ?? user.email}</p>
-      )}
+    <div className="min-h-full text-foreground">
+      <div className="mx-auto max-w-xl px-6 py-20">
+        <h1 className="text-4xl font-bold tracking-tight">Decide together</h1>
+        <p className="mt-3 text-muted-foreground">
+          Ask a question, share the link, and let everyone add options and vote.
+        </p>
+
+        <div className="mt-10 rounded-lg border border-border bg-card p-6">
+          {isSignedIn ? (
+            <CreateRoomForm />
+          ) : (
+            <div className="text-center">
+              <p className="text-sm text-muted-foreground">Sign in to create a room.</p>
+              <Button className="mt-4" onClick={() => setShowAuthModal(true)}>
+                Sign in
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {showAuthModal && <AuthOverlay onClose={() => setShowAuthModal(false)} />}
     </div>
+  )
+}
+
+function CreateRoomForm() {
+  const { ready, createConfirmed } = useMutations<Room>('rooms')
+  const navigate = useNavigate()
+  const { error } = useToast()
+  const [question, setQuestion] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    const trimmed = question.trim()
+    if (!trimmed) return
+
+    setSubmitting(true)
+    try {
+      // Confirmed: wait for the server to accept the room before navigating to it.
+      const roomId = await createConfirmed({ question: trimmed })
+      navigate(`/room/${roomId}`)
+    } catch (err) {
+      error('Could not create room', String(err))
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="question">Your question</Label>
+        <Input
+          id="question"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder="Where should we eat Friday?"
+          maxLength={200}
+          autoFocus
+        />
+      </div>
+      <Button type="submit" className="w-full" disabled={!ready || submitting || !question.trim()}>
+        {submitting ? 'Creating…' : 'Create room'}
+      </Button>
+    </form>
   )
 }
